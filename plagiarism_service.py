@@ -8,10 +8,10 @@ from collections import Counter
 from stop_words import get_stop_words
 
 try:
-    stanza.Pipeline('uk')
+    nlp = stanza.Pipeline('uk', processors='tokenize,lemma', use_gpu=False)
 except:
     stanza.download('uk')
-nlp = stanza.Pipeline('uk', processors='tokenize,lemma', use_gpu=False)
+    nlp = stanza.Pipeline('uk', processors='tokenize,lemma', use_gpu=False)
 
 STOP_WORDS = set(get_stop_words('uk'))
 
@@ -105,7 +105,7 @@ def semantic_similarity(database_texts, input_text):
     similarities = cosine_similarity([input_vec], db_vecs)[0]
     return similarities
 
-def calculate_full_similarity(database_texts, input_text, ngram_n):
+def calculate_plagiarism_similarity(database_texts, input_text, ngram_n):
     processed_database = [preprocess_text(t) for t in database_texts]
     processed_input = preprocess_text(input_text)
 
@@ -118,25 +118,20 @@ def calculate_full_similarity(database_texts, input_text, ngram_n):
 
     cosine_scores = cosine_sim(input_vec, db_vecs)
 
-    # n-gram
     jaccard_scores = [
         jaccard_similarity(processed_input, text, n=ngram_n)
         for text in processed_database
     ]
 
-    # semantic
-    semantic_scores = semantic_similarity(database_texts, input_text)
-
-    # combine
-    combined = [
-        (c + j + s)/3
-        for c, j, s in zip(cosine_scores, jaccard_scores, semantic_scores)
+    plagiarism_scores = [
+        (c + j) / 2
+        for c, j in zip(cosine_scores, jaccard_scores)
     ]
 
-    return combined
+    return plagiarism_scores
 
 def get_results(database_texts, filenames, input_text, ngram_n):
-    similarities = calculate_full_similarity(database_texts, input_text, ngram_n)
+    similarities = calculate_plagiarism_similarity(database_texts, input_text, ngram_n)
 
     results = list(zip(filenames, similarities, database_texts))
     results.sort(key=lambda x: x[1], reverse=True)
@@ -165,5 +160,162 @@ def get_results(database_texts, filenames, input_text, ngram_n):
                 "similarity": round(similarity * 100, 2)
             }
             for filename, similarity, _ in results
+        ]
+    }
+
+def check_plagiarism_with_progress(database_texts, filenames, input_text, ngram_n):
+    total = len(database_texts)
+
+    if total == 0:
+        yield {
+            "type": "error",
+            "message": "База текстів порожня"
+        }
+        return
+
+    processed_input = preprocess_text(input_text)
+
+    results = []
+
+    for index, (filename, db_text) in enumerate(zip(filenames, database_texts), start=1):
+        processed_db_text = preprocess_text(db_text)
+
+        tfidf_matrix = compute_tfidf([processed_db_text, processed_input])
+        cosine_score = cosine_similarity(tfidf_matrix[1], tfidf_matrix[0])[0][0]
+
+        jaccard_score = jaccard_similarity(
+            processed_input,
+            processed_db_text,
+            n=ngram_n
+        )
+
+        combined_score = (cosine_score + jaccard_score) / 2
+
+        results.append({
+            "filename": filename,
+            "similarity": combined_score,
+            "database_text": db_text
+        })
+
+        progress = round((index / total) * 100)
+
+        yield {
+            "type": "progress",
+            "processed": index,
+            "total": total,
+            "progress": progress,
+            "current_file": filename
+        }
+
+    results.sort(key=lambda x: x["similarity"], reverse=True)
+
+    best_result = results[0]
+    max_similarity = best_result["similarity"]
+    uniqueness = max(0.0, 1 - max_similarity) * 100
+
+    input_words = preprocess_text(input_text).split()
+    similar_words = preprocess_text(best_result["database_text"]).split()
+    common_words = Counter(input_words) & Counter(similar_words)
+
+    top_results = results[:10]
+
+    yield {
+        "type": "result",
+        "mode": "plagiarism",
+        "most_similar_file": best_result["filename"],
+        "similarity": round(max_similarity * 100, 2),
+        "uniqueness": round(uniqueness, 2),
+        "input_text": input_text,
+        "most_similar_text": best_result["database_text"],
+
+        "common_words": [
+            {"word": word, "count": count}
+            for word, count in common_words.most_common()
+        ],
+
+        "top_results": [
+            {
+                "filename": item["filename"],
+                "similarity": round(item["similarity"] * 100, 2),
+                "text": item["database_text"]
+            }
+            for item in top_results
+        ],
+
+        "all_results": [
+            {
+                "filename": item["filename"],
+                "similarity": round(item["similarity"] * 100, 2),
+                "text": item["database_text"]
+            }
+            for item in results
+        ]
+    }
+
+def check_semantic_with_progress(database_texts, filenames, input_text):
+    total = len(database_texts)
+
+    if total == 0:
+        yield {
+            "type": "error",
+            "message": "База текстів порожня"
+        }
+        return
+
+    results = []
+
+    for index, (filename, db_text) in enumerate(zip(filenames, database_texts), start=1):
+        semantic_score = float(semantic_similarity([db_text], input_text)[0])
+
+        results.append({
+            "filename": filename,
+            "similarity": semantic_score,
+            "database_text": db_text
+        })
+
+        progress = round((index / total) * 100)
+
+        yield {
+            "type": "progress",
+            "processed": index,
+            "total": total,
+            "progress": progress,
+            "current_file": filename
+        }
+
+    results.sort(key=lambda x: x["similarity"], reverse=True)
+
+    best_result = results[0]
+    max_similarity = best_result["similarity"]
+    uniqueness = max(0.0, 1 - max_similarity) * 100
+
+    top_results = results[:10]
+
+    yield {
+        "type": "result",
+        "mode": "semantic",
+        "most_similar_file": best_result["filename"],
+        "similarity": round(max_similarity * 100, 2),
+        "uniqueness": round(uniqueness, 2),
+        "input_text": input_text,
+        "most_similar_text": best_result["database_text"],
+        "common_words": [],
+
+        "top_results": [
+            {
+                "filename": item["filename"],
+                "similarity": round(item["similarity"] * 100, 2),
+                "text": item["database_text"]
+            }
+            for item in top_results
+        ],
+
+        "all_results": [
+            {
+                "filename": item["filename"],
+                "similarity": round(item["similarity"] * 100, 2),
+                "text": item["database_text"]
+            }
+            for item in results
         ]
     }

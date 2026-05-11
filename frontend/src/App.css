@@ -62,3 +62,108 @@ button {
 .error {
   color: red;
 }
+
+.loading-box {
+  margin-top: 20px;
+  text-align: center;
+}
+
+.spinner {
+  width: 36px;
+  height: 36px;
+  border: 4px solid #dbeafe;
+  border-top: 4px solid #2563eb;
+  border-radius: 50%;
+  margin: 0 auto 10px;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.progress-bar {
+  width: 100%;
+  height: 12px;
+  background: #e5e7eb;
+  border-radius: 999px;
+  overflow: hidden;
+  margin-top: 10px;
+}
+
+.progress-fill {
+  height: 100%;
+  background: #2563eb;
+  transition: width 0.4s ease;
+}
+
+.loading-box span {
+  display: block;
+  margin-top: 8px;
+  font-weight: bold;
+}
+
+.report-button {
+  margin-top: 20px;
+  background: #16a34a;
+}
+
+.back-button {
+  width: auto;
+  padding: 10px 16px;
+  background: #374151;
+  margin-bottom: 20px;
+}
+
+.report-page {
+  background: white;
+  padding: 28px;
+  border-radius: 14px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+}
+
+.report-section {
+  margin-top: 24px;
+}
+
+.report-section h2 {
+  border-bottom: 1px solid #e5e7eb;
+  padding-bottom: 8px;
+}
+
+.export-button {
+  width: auto;
+  padding: 10px 16px;
+  background: #2563eb;
+  margin-bottom: 20px;
+  margin-left: 10px;
+}
+
+.common-word {
+  cursor: pointer;
+  transition: 0.2s;
+}
+
+.common-word:hover {
+  background: #2563eb;
+  color: white;
+}
+
+.text-box {
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  padding: 16px;
+  border-radius: 10px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+.highlighted-word {
+  background: #fde68a;
+  color: #92400e;
+  font-weight: bold;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
