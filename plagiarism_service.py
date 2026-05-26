@@ -6,6 +6,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 from sentence_transformers import SentenceTransformer
 from collections import Counter
 from stop_words import get_stop_words
+from style_detector import detect_text_style
 
 try:
     nlp = stanza.Pipeline('uk', processors='tokenize,lemma', use_gpu=False)
@@ -57,6 +58,7 @@ def preprocess_text(text):
 
     return " ".join(words)
 
+
 def get_common_words(text1, text2):
     words1 = preprocess_text(text1).split()
     words2 = preprocess_text(text2).split()
@@ -72,6 +74,26 @@ def get_common_words(text1, text2):
     common_sorted = sorted(common.items(), key=lambda x: x[1], reverse=True)
 
     return common_sorted
+
+def get_words_with_positions(text):
+    doc = nlp(text)
+
+    result = []
+
+    for sentence in doc.sentences:
+        for word in sentence.words:
+            lemma = word.lemma.lower()
+            form = word.text
+
+            if lemma not in STOP_WORDS and len(lemma) > 2:
+                result.append({
+                    "lemma": lemma,
+                    "form": form,
+                    "start": word.start_char,
+                    "end": word.end_char
+                })
+
+    return result
 
 def compute_tfidf(texts):
     vectorizer = TfidfVectorizer()
@@ -145,11 +167,16 @@ def get_results(database_texts, filenames, input_text, ngram_n):
     similar_words = preprocess_text(most_similar_text).split()
 
     common_words = Counter(input_words) & Counter(similar_words)
+    style_result = detect_text_style(input_text)
 
     return {
         "most_similar_file": most_similar_file,
         "similarity": round(max_similarity * 100, 2),
         "uniqueness": round(uniqueness, 2),
+
+        "text_style": style_result["style"],
+        "style_scores": style_result["scores"],
+
         "common_words": [
             {"word": word, "count": count}
             for word, count in common_words.most_common()
@@ -165,6 +192,8 @@ def get_results(database_texts, filenames, input_text, ngram_n):
 
 def check_plagiarism_with_progress(database_texts, filenames, input_text, ngram_n):
     total = len(database_texts)
+
+    style_result = detect_text_style(input_text)
 
     if total == 0:
         yield {
@@ -213,9 +242,13 @@ def check_plagiarism_with_progress(database_texts, filenames, input_text, ngram_
     max_similarity = best_result["similarity"]
     uniqueness = max(0.0, 1 - max_similarity) * 100
 
-    input_words = preprocess_text(input_text).split()
-    similar_words = preprocess_text(best_result["database_text"]).split()
-    common_words = Counter(input_words) & Counter(similar_words)
+    input_words_data = get_words_with_positions(input_text)
+    similar_words_data = get_words_with_positions(best_result["database_text"])
+
+    input_counter = Counter([item["lemma"] for item in input_words_data])
+    similar_counter = Counter([item["lemma"] for item in similar_words_data])
+
+    common_words = input_counter & similar_counter
 
     top_results = results[:10]
 
@@ -225,11 +258,28 @@ def check_plagiarism_with_progress(database_texts, filenames, input_text, ngram_
         "most_similar_file": best_result["filename"],
         "similarity": round(max_similarity * 100, 2),
         "uniqueness": round(uniqueness, 2),
+
+        "text_style": style_result["style"],
+        "style_scores": style_result["scores"],
+
         "input_text": input_text,
         "most_similar_text": best_result["database_text"],
 
         "common_words": [
-            {"word": word, "count": count}
+            {
+                "word": word,
+                "count": count,
+                "input_positions": [
+                    {"start": item["start"], "end": item["end"]}
+                    for item in input_words_data
+                    if item["lemma"] == word
+                ],
+                "similar_positions": [
+                    {"start": item["start"], "end": item["end"]}
+                    for item in similar_words_data
+                    if item["lemma"] == word
+                ]
+            }
             for word, count in common_words.most_common()
         ],
 
@@ -252,8 +302,12 @@ def check_plagiarism_with_progress(database_texts, filenames, input_text, ngram_
         ]
     }
 
+
+
 def check_semantic_with_progress(database_texts, filenames, input_text):
     total = len(database_texts)
+
+    style_result = detect_text_style(input_text)
 
     if total == 0:
         yield {
@@ -297,6 +351,10 @@ def check_semantic_with_progress(database_texts, filenames, input_text):
         "most_similar_file": best_result["filename"],
         "similarity": round(max_similarity * 100, 2),
         "uniqueness": round(uniqueness, 2),
+
+        "text_style": style_result["style"],
+        "style_scores": style_result["scores"],
+
         "input_text": input_text,
         "most_similar_text": best_result["database_text"],
         "common_words": [],
@@ -319,3 +377,4 @@ def check_semantic_with_progress(database_texts, filenames, input_text):
             for item in results
         ]
     }
+

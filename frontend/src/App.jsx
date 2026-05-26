@@ -49,23 +49,35 @@ function App() {
   const [error, setError] = useState("");
   const [progress, setProgress] = useState(0);
   const [page, setPage] = useState("main");
-  const [hoveredWord, setHoveredWord] = useState("");
+  const [hoveredWord, setHoveredWord] = useState(null);
+  const [file, setFile] = useState(null);
+  const [inputType, setInputType] = useState("text");
 
-  const highlightText = (text, word) => {
-    if (!word || !text) return text;
+  const highlightText = (text, positions) => {
+    if (!positions || positions.length === 0 || !text) {
+      return text;
+    }
 
-    const regex = new RegExp(`(${word})`, "gi");
-    const parts = text.split(regex);
+    const sorted = [...positions].sort((a, b) => a.start - b.start);
 
-    return parts.map((part, index) =>
-      part.toLowerCase() === word.toLowerCase() ? (
+    const result = [];
+    let lastIndex = 0;
+
+    sorted.forEach((pos, index) => {
+      result.push(text.slice(lastIndex, pos.start));
+
+      result.push(
         <span key={index} className="highlighted-word">
-          {part}
+          {text.slice(pos.start, pos.end)}
         </span>
-      ) : (
-        part
-      )
-    );
+      );
+
+      lastIndex = pos.end;
+    });
+
+    result.push(text.slice(lastIndex));
+
+    return result;
   };
 
   const exportReportToPDF = async () => {
@@ -133,9 +145,15 @@ function App() {
 
     doc.save("report.pdf");
   };
+
   const checkText = async () => {
-    if (!text.trim()) {
+    if (inputType === "text" && !text.trim()) {
       setError("Введіть текст для перевірки");
+      return;
+    }
+
+    if (inputType === "file" && !file) {
+      setError("Завантажте файл для перевірки");
       return;
     }
 
@@ -146,17 +164,31 @@ function App() {
 
 
     try {
-      const response = await fetch("http://127.0.0.1:8000/check-progress", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          text: text,
-          ngram_n: Number(ngramN),
-          mode: mode
-        })
-      });
+      let response;
+
+      if (inputType === "text") {
+        response = await fetch("http://127.0.0.1:8000/check-progress", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            text: text,
+            ngram_n: Number(ngramN),
+            mode: mode
+          })
+        });
+      } else {
+        const formData = new FormData();
+        formData.append("file", file);
+        formData.append("ngram_n", Number(ngramN));
+        formData.append("mode", mode);
+
+        response = await fetch("http://127.0.0.1:8000/check-file-progress", {
+          method: "POST",
+          body: formData
+        });
+      }
 
       if (!response.ok) {
         throw new Error("Помилка при перевірці");
@@ -189,7 +221,7 @@ function App() {
           if (data.type === "result") {
             setProgress(100);
             setResult(data);
-            setHoveredWord("");
+            setHoveredWord(null);
           }
 
           if (data.type === "error") {
@@ -250,134 +282,143 @@ function App() {
     return (
       <div className="page">
         <div className="container">
+          <div className="report-header">
           <button className="back-button" onClick={() => setPage("main")}>
             ← Назад
           </button>
           <button className="export-button" onClick={exportReportToPDF}>
             Експорт у PDF
           </button>
+          </div>
 
           <div className="report-page">
             <h1>Звіт про перевірку тексту</h1>
 
-            <div className="report-section">
-              <h2>Загальний результат</h2>
+            <div className="report-grid">
+              <div className="report-column">
+                <div className="report-section">
+                  <h2>Загальний результат</h2>
 
-              <p>
-                <b>Найбільш схожий документ:</b> {result.most_similar_file}
-              </p>
+                  <p>
+                    <b>Найбільш схожий документ:</b> {result.most_similar_file}
+                  </p>
 
-              <p>
-                <b>Максимальна схожість:</b> {result.similarity}%
-              </p>
+                  <p>
+                    <b>Максимальна схожість:</b> {result.similarity}%
+                  </p>
 
-              <p>
-                <b>Унікальність тексту:</b> {result.uniqueness}%
-              </p>
-            </div>
+                  <p>
+                    <b>Унікальність тексту:</b> {result.uniqueness}%
+                  </p>
 
-
-            {result.mode === "plagiarism" && (
-              <div className="report-section">
-                <h2>Спільні слова</h2>
-
-                <div className="words">
-                  {result.common_words.length > 0 ? (
-                    result.common_words.map((item, index) => (
-                      <span
-                        key={index}
-                        className="common-word"
-                        onMouseEnter={() => setHoveredWord(item.word)}
-                        onMouseLeave={() => setHoveredWord("")}
-                      >
-                        {item.word} ({item.count})
-                      </span>
-                    ))
-                  ) : (
-                    <p>Спільних слів не знайдено.</p>
-                  )}
+                  <p>
+                    <b>Стиль тексту:</b> {result.text_style}
+                  </p>
                 </div>
+
+
+                {result.mode === "plagiarism" && (
+                  <div className="report-section">
+                    <h2>Спільні слова</h2>
+
+                    <div className="words">
+                      {result.common_words.length > 0 ? (
+                        result.common_words.map((item, index) => (
+                          <span
+                            key={index}
+                            className="common-word"
+                            onMouseEnter={() =>
+                              setHoveredWord({
+                                input: item.input_positions,
+                                similar: item.similar_positions
+                              })
+                            }
+                            onMouseLeave={() => setHoveredWord(null)}
+                          >
+                            {item.word} ({item.count})
+                          </span>
+                        ))
+                      ) : (
+                        <p>Спільних слів не знайдено.</p>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                <div className="report-section">
+                  <h2>Вхідний текст</h2>
+                    <div className="text-box">
+                      {highlightText(result.input_text, hoveredWord?.input)}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="report-column">
+                  <div className="report-section">
+                    <h2>Найбільш схожий текст</h2>
+                    <div className="text-box">
+                      {highlightText(result.most_similar_text, hoveredWord?.similar)}
+                    </div>
+                  </div>
+
+                  <div className="report-section">
+                    <h2>10 найбільш схожих текстів</h2>
+
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>№</th>
+                          <th>Назва файлу</th>
+                          <th>Схожість</th>
+                        </tr>
+                      </thead>
+
+                      <tbody>
+                        {result.top_results.map((item, index) => (
+                          <tr key={index}>
+                            <td>{index + 1}</td>
+
+                            <td>
+                              {item.filename}
+                            </td>
+
+                            <td>{item.similarity}%</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+
+                    <button
+                      className="report-button"
+                      onClick={() => setPage("allResults")}
+                    >
+                      Показати всі результати
+                    </button>
+
+                  </div>
+
+                  <div className="report-section">
+                    <h2>Діаграма схожості</h2>
+
+                    <PieChart width={600} height={400}>
+                      <Pie
+                        data={result.top_results.map((item, index) => ({
+                          ...item,
+                          fill: getColor(index)
+                        }))}
+                        dataKey="similarity"
+                        nameKey="filename"
+                        cx="50%"
+                        cy="50%"
+                        outerRadius={120}
+                        label={({ percent }) => `${(percent * 100).toFixed(1)}%`}
+                      />
+
+                      <Tooltip formatter={(value) => `${value}%`} />
+                      <Legend />
+                    </PieChart>
+                  </div>
               </div>
-            )}
-
-            <div className="report-section">
-              <h2>Вхідний текст</h2>
-              <div className="text-box">
-                {highlightText(result.input_text, hoveredWord)}
-              </div>
-            </div>
-
-            <div className="report-section">
-              <h2>Найбільш схожий текст</h2>
-              <div className="text-box">
-                {highlightText(result.most_similar_text, hoveredWord)}
-              </div>
-            </div>
-
-            <div className="report-section">
-              <h2>10 найбільш схожих текстів</h2>
-
-              <table>
-                <thead>
-                  <tr>
-                    <th>№</th>
-                    <th>Назва файлу</th>
-                    <th>Схожість</th>
-                  </tr>
-                </thead>
-
-                <tbody>
-                  {result.top_results.map((item, index) => (
-                    <tr key={index}>
-                      <td>{index + 1}</td>
-
-                      <td
-                        className={
-                          hoveredWord &&
-                          item.text &&
-                          item.text.toLowerCase().includes(hoveredWord.toLowerCase())
-                            ? "highlighted-file"
-                            : ""
-                        }
-                      >
-                        {item.filename}
-                      </td>
-
-                      <td>{item.similarity}%</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-
-              <button
-                className="report-button"
-                onClick={() => setPage("allResults")}
-              >
-                Показати всі результати
-              </button>
-
-            </div>
-
-            <div className="report-section">
-              <h2>Діаграма схожості</h2>
-
-              <PieChart width={600} height={400}>
-                <Pie
-                  data={result.top_results.map((item, index) => ({
-                    ...item,
-                    fill: getColor(index)
-                  }))}
-                  dataKey="similarity"
-                  nameKey="filename"
-                  cx="50%"
-                  cy="50%"
-                  outerRadius={120}
-                  label={({ percent }) => `${(percent * 100).toFixed(1)}%`}
-                />
-
-                <Tooltip formatter={(value) => `${value}%`} />
-                <Legend />
-              </PieChart>
             </div>
           </div>
         </div>
@@ -390,13 +431,45 @@ function App() {
         <h1>Система перевірки тексту</h1>
 
         <div className="card">
-          <label>Введіть текст:</label>
+          <label>Спосіб введення:</label>
 
-          <textarea
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            placeholder="Вставте текст..."
-          />
+          <select
+            value={inputType}
+            onChange={(e) => {
+              setInputType(e.target.value);
+              setText("");
+              setFile(null);
+            }}
+          >
+            <option value="text">Ввести текст</option>
+            <option value="file">Завантажити файл</option>
+          </select>
+
+          {inputType === "text" && (
+            <>
+              <label>Введіть текст:</label>
+
+              <textarea
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                placeholder="Вставте текст..."
+              />
+            </>
+          )}
+
+          {inputType === "file" && (
+            <>
+              <label>Завантажте файл:</label>
+
+              <input
+                type="file"
+                accept=".pdf,.docx,.odt"
+                onChange={(e) => setFile(e.target.files[0])}
+              />
+            </>
+          )}
+
+          <br />
 
           <label>Тип перевірки:</label>
 
